@@ -1,12 +1,9 @@
 import { Router } from 'express';
 import { join } from 'path';
-import { translateDocument, translateLargeDocument } from '../services/deepl.js';
+import { translateSRT } from '../services/deepl.js';
 import { extractSubtitles } from '../services/ffmpeg.js';
 import { DATA_DIR, MOVIES_DIR } from '../utils/paths.js';
-import fs from 'fs';
-
 const router = Router();
-const MAX_FILE_SIZE = 130 * 1024; // 130KB as a safe threshold (below the 150KB limit)
 
 router.post('/translate_subtitle', async (req, res) => {
   try {
@@ -30,24 +27,7 @@ router.post('/translate_subtitle', async (req, res) => {
       subtitlePath = join(MOVIES_DIR, serie, srt_path);
     }
       
-    // Check the file size
-    const stats = fs.statSync(subtitlePath);
-    let translatedPath;
-    
-    if (stats.size > MAX_FILE_SIZE) {
-      console.log(`Large SRT file detected (${Math.round(stats.size/1024)}KB). Using large file translation method.`);
-      translatedPath = await translateLargeDocument(
-        subtitlePath,
-        source_lang,
-        target_lang
-      );
-    } else {
-      translatedPath = await translateDocument(
-        subtitlePath,
-        source_lang,
-        target_lang
-      );
-    }
+    const translatedPath = await translateSRT(subtitlePath, source_lang, target_lang);
 
     res.json({ path: translatedPath });
   } catch (error) {

@@ -382,6 +382,129 @@ export async function translateLargeDocument(filePath, sourceLang, targetLang) {
 }
 
 /**
+ * Translates an array of text strings using the DeepL Text API.
+ * @param {string[]} texts Array of strings to translate
+ * @param {string} sourceLang Source language
+ * @param {string} targetLang Target language
+ * @returns {Promise<string[]>} Array of translated strings in the same order
+ */
+async function translateTexts(texts, sourceLang, targetLang) {
+  const response = await axios.post(
+    `${DEEPL_API_URL}/translate`,
+    { text: texts, source_lang: sourceLang, target_lang: targetLang },
+    {
+      headers: {
+        'Authorization': `DeepL-Auth-Key ${process.env.DEEPL_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+  return response.data.translations.map(t => t.text);
+}
+
+const TEXT_API_MAX_TEXTS = 50;
+const TEXT_API_MAX_BYTES = 100 * 1024; // 100KB safety margin under the 128KB limit
+
+/**
+ * Splits an array of text strings into batches that respect both the
+ * max-texts-per-request and max-bytes-per-request limits of the DeepL Text API.
+ * @param {string[]} texts Array of text strings
+ * @returns {string[][]} Array of batches
+ */
+function buildTextBatches(texts) {
+  const batches = [];
+  let currentBatch = [];
+  let currentBytes = 0;
+
+  for (const text of texts) {
+    const textBytes = Buffer.byteLength(text, 'utf-8');
+
+    const wouldExceedCount = currentBatch.length >= TEXT_API_MAX_TEXTS;
+    const wouldExceedBytes = currentBytes + textBytes > TEXT_API_MAX_BYTES;
+
+    if (currentBatch.length > 0 && (wouldExceedCount || wouldExceedBytes)) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentBytes = 0;
+    }
+
+    currentBatch.push(text);
+    currentBytes += textBytes;
+  }
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  return batches;
+}
+
+/**
+ * Translates an SRT file using the DeepL Text API, guaranteeing 1:1 mapping
+ * between original and translated subtitle blocks.
+ * @param {string} filePath Path to the SRT file
+ * @param {string} sourceLang Source language
+ * @param {string} targetLang Target language
+ * @returns {Promise<string>} Path to the translated file
+ */
+export async function translateSRT(filePath, sourceLang, targetLang) {
+  const fileContent = fs.readFileSync(filePath, 'utf-8');
+  const subtitles = parseSRT(fileContent);
+  console.log(`Translating ${subtitles.length} subtitle blocks via Text API`);
+
+  // Separate non-empty subtitles (to be translated) from empty ones (kept as-is).
+  // We track the original index so we can map translations back correctly.
+  const toTranslate = []; // { originalIndex, text }
+  for (let i = 0; i < subtitles.length; i++) {
+    if (subtitles[i].text.trim() !== '') {
+      toTranslate.push({ originalIndex: i, text: subtitles[i].text });
+    }
+  }
+
+  // Replace newlines with space so DeepL receives each subtitle as a single
+  // sentence with full context, instead of treating each line independently.
+  const multilineCount = toTranslate.filter(item => item.text.includes('\n')).length;
+  if (multilineCount > 0) {
+    console.log(`Normalizing ${multilineCount} multi-line subtitles: removing line breaks so DeepL retains context between lines`);
+  }
+  const texts = toTranslate.map(item => item.text.replace(/\n/g, ' '));
+  const batches = buildTextBatches(texts);
+  console.log(`Sending ${texts.length} non-empty texts in ${batches.length} batch(es)`);
+
+  // Translate batches sequentially and collect results in order
+  const translatedTexts = [];
+  for (let i = 0; i < batches.length; i++) {
+    console.log(`Translating batch ${i + 1}/${batches.length} (${batches[i].length} texts)...`);
+    try {
+      const results = await translateTexts(batches[i], sourceLang, targetLang);
+      translatedTexts.push(...results);
+    } catch (error) {
+      console.error(`Error translating batch ${i + 1}:`, error.message);
+      if (error.response) {
+        console.error('DeepL API Error Status:', error.response.status);
+        console.error('DeepL API Error Response:', error.response.data);
+        const msg = error.response.data?.message || `API Error (${error.response.status})`;
+        const enhanced = new Error(msg);
+        enhanced.status = error.response.status;
+        enhanced.apiDetails = error.response.data;
+        throw enhanced;
+      }
+      throw error;
+    }
+  }
+
+  // Map translations back to the original subtitle array
+  for (let i = 0; i < toTranslate.length; i++) {
+    subtitles[toTranslate[i].originalIndex].text = translatedTexts[i];
+  }
+
+  const outputPath = getTranslatedFilePath(filePath, sourceLang, targetLang);
+  fs.writeFileSync(outputPath, stringifySRT(subtitles));
+  console.log(`Translation complete: ${outputPath}`);
+  return outputPath;
+}
+
+/**
  * Splits an array of subtitles into smaller chunks that don't exceed the character limit
  * @param {Array} subtitles Array of subtitle objects
  * @param {number} charLimit Character limit per chunk
