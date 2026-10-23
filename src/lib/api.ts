@@ -113,6 +113,12 @@ export const translateSubtitle = async (params: {
   return data;
 };
 
+/** Requeues a failed job; batches finished before the failure are kept. */
+export const retryJob = async (id: string): Promise<TranslationJob> => {
+  const { data } = await api.post<TranslationJob>(`/jobs/${id}/retry`);
+  return data;
+};
+
 export const getJobs = async (): Promise<TranslationJob[]> => {
   const { data } = await api.get<TranslationJob[]>('/jobs');
   return data;

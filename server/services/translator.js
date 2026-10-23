@@ -24,19 +24,27 @@ export async function getUsage() {
   return { provider: 'deepl', ...(await getUsageStats()) };
 }
 
-async function translateWithDeepL(texts, sourceLang, targetLang, { onProgress } = {}) {
+async function translateWithDeepL(texts, sourceLang, targetLang, { onProgress, partial = [] } = {}) {
   // Replace newlines with space so DeepL receives each subtitle as a single
   // sentence with full context, instead of treating each line independently.
   const normalized = texts.map(text => text.replace(/\n/g, ' '));
   const batches = buildTextBatches(normalized);
   console.log(`Sending ${normalized.length} non-empty texts to DeepL in ${batches.length} batch(es)`);
 
-  const translatedTexts = [];
   onProgress?.(0, batches.length);
+  let offset = 0;
   for (let i = 0; i < batches.length; i++) {
+    const start = offset;
+    offset += batches[i].length;
+    // Skip batches already translated by a previous failed run
+    if (batches[i].every((_, k) => partial[start + k] !== undefined)) {
+      onProgress?.(i + 1, batches.length);
+      continue;
+    }
     console.log(`Translating batch ${i + 1}/${batches.length} (${batches[i].length} texts)...`);
     try {
-      translatedTexts.push(...await translateTexts(batches[i], sourceLang, targetLang));
+      const results = await translateTexts(batches[i], sourceLang, targetLang);
+      results.forEach((text, k) => { partial[start + k] = text; });
       onProgress?.(i + 1, batches.length);
     } catch (error) {
       console.error(`Error translating batch ${i + 1}:`, error.message);
@@ -52,7 +60,7 @@ async function translateWithDeepL(texts, sourceLang, targetLang, { onProgress } 
       throw error;
     }
   }
-  return translatedTexts;
+  return texts.map((_, i) => partial[i]);
 }
 
 /**
@@ -61,8 +69,11 @@ async function translateWithDeepL(texts, sourceLang, targetLang, { onProgress } 
  * @param {string} filePath Path to the SRT file
  * @param {string} sourceLang Source language
  * @param {string} targetLang Target language
- * @param {{title?: string, onProgress?: (done: number, total: number) => void}} options
- *   Extra context for the LLM provider and a batch progress callback
+ * @param {object} options
+ * @param {string} [options.title] Title of the work, as context for the LLM provider
+ * @param {(done: number, total: number) => void} [options.onProgress] Batch progress callback
+ * @param {Array<string|undefined>} [options.partial] Translations kept between runs
+ *   so a retry resumes where the previous run failed
  * @returns {Promise<string>} Path to the translated file
  */
 export async function translateSRT(filePath, sourceLang, targetLang, options = {}) {
@@ -78,6 +89,12 @@ export async function translateSRT(filePath, sourceLang, targetLang, options = {
     }
   }
   const texts = toTranslate.map(item => item.text);
+
+  // Discard saved progress if the file changed since the failed run
+  if (options.partial && options.partial.length !== texts.length) {
+    options.partial.length = 0;
+    options.partial.length = texts.length;
+  }
 
   const translatedTexts = provider === 'llm'
     ? await translateTextsLLM(texts, sourceLang, targetLang, options)
