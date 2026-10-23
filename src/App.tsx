@@ -6,6 +6,7 @@ import { ShowSelector } from './components/ShowSelector';
 import { SubtitleTranslator } from './components/SubtitleTranslator';
 import { VideoExtractor } from './components/VideoExtractor';
 import { TranslationStatus } from './components/TranslationStatus';
+import { TranslationJobs } from './components/TranslationJobs';
 
 export function App() {
   const [mediaType, setMediaType] = useState<'series' | 'movies'>('series');
@@ -17,7 +18,6 @@ export function App() {
   const [subtitlePath, setSubtitlePath] = useState('');
   const [videoPath, setVideoPath] = useState('');
   const [error, setError] = useState<Error | null>(null);
-  const [translatedPath, setTranslatedPath] = useState<string | null>(null);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
@@ -36,7 +36,6 @@ export function App() {
                 setSubtitlePath('');
                 setVideoPath('');
                 setError(null);
-                setTranslatedPath(null);
               }}  />
             <ModeSelector mode={mode} onModeChange={setMode} />
             
@@ -62,12 +61,10 @@ export function App() {
                 targetLang={targetLang}
                 onSourceLangChange={setSourceLang}
                 onTargetLangChange={setTargetLang}
-                onTranslationComplete={(path) => setTranslatedPath(path)}
                 onError={setError}
                 onClearStatus={() => {
                   setError(null);
-                  setTranslatedPath(null);
-                }}
+                  }}
               />
             ) : (
               <VideoExtractor
@@ -80,21 +77,20 @@ export function App() {
                 targetLang={targetLang}
                 onSourceLangChange={setSourceLang}
                 onTargetLangChange={setTargetLang}
-                onTranslationComplete={(path) => setTranslatedPath(path)}
                 onError={setError}
                 onClearStatus={() => {
                   setError(null);
-                  setTranslatedPath(null);
-                }}
+                  }}
               />
             )}
 
             <TranslationStatus
-              isSuccess={!!translatedPath}
+              isSuccess={false}
               isError={!!error}
               error={error}
-              data={translatedPath ? { path: translatedPath } : undefined}
             />
+
+            <TranslationJobs />
           </div>
         </div>
       </div>
