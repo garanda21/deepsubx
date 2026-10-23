@@ -70,13 +70,26 @@ async function processQueue() {
 
 /**
  * Queues a subtitle translation. Jobs run one at a time.
+ * Throws a 409 error if the same file and target language is already queued or running.
  */
-export function createTranslationJob({ subtitlePath, sourceLang, targetLang, title, updatePlex }) {
+export function createTranslationJob({ subtitlePath, sourceLang, targetLang, title, season, updatePlex }) {
+  const duplicate = [...jobs.values()].some(job =>
+    (job.status === 'queued' || job.status === 'running')
+    && job.subtitlePath === subtitlePath
+    && job.targetLang === targetLang
+  );
+  if (duplicate) {
+    const error = new Error(`${basename(subtitlePath)} is already being translated to ${targetLang}`);
+    error.status = 409;
+    throw error;
+  }
+
   const job = {
     id: randomUUID(),
     status: 'queued',
     file: basename(subtitlePath),
     title,
+    season: season || null,
     sourceLang,
     targetLang,
     updatePlex: !!updatePlex,
