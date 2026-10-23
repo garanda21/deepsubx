@@ -17,7 +17,6 @@ interface Props {
   targetLang: string;
   onSourceLangChange: (lang: string) => void;
   onTargetLangChange: (lang: string) => void;
-  onTranslationComplete: (path: string) => void;
   onError: (error: Error) => void;
   onClearStatus: () => void;
 }
@@ -32,7 +31,6 @@ export function SubtitleTranslator({
   targetLang,
   onSourceLangChange,
   onTargetLangChange,
-  onTranslationComplete,
   onError,
   onClearStatus,
 }: Props) {
@@ -54,20 +52,16 @@ export function SubtitleTranslator({
       onClearStatus();
       
       try {
-        const { path } = await api.translateSubtitle({
+        // The server queues the job; TranslationJobs follows its progress
+        return await api.translateSubtitle({
           serie: show,
           season: type === 'series' ? season : null,
           srt_path: subtitlePath,
           source_lang: sourceLang,
           target_lang: targetLang,
           type,
+          update_plex: updatePlex && !!isPlexConfigured,
         });
-
-        if (updatePlex && await PlexService.isConfigured()) {
-          await PlexService.updateLibrary();
-        }
-
-        return path;
       } catch (caught: unknown) {
         const error = caught as MutationError;
         console.log('Translation error:', error);
@@ -97,12 +91,8 @@ export function SubtitleTranslator({
         throw error;
       }
     },
-    onSuccess: (path: string) => {
-      onTranslationComplete(path);
-      // Wait a bit for DeepL API to update usage stats
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: ['character-count'] });
-      }, 2000); // 2-second delay
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
     },
   });
 
@@ -168,7 +158,7 @@ export function SubtitleTranslator({
         disabled={isLoading || !subtitlePath || !sourceLang || !targetLang}
         className="w-full rounded-lg bg-blue-600 px-4 py-3 font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-300"
       >
-        {isLoading ? 'Translating...' : 'Translate Subtitle'}
+        {isLoading ? 'Starting translation...' : 'Translate Subtitle'}
       </button>
     </div>
   );

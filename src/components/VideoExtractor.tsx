@@ -17,7 +17,6 @@ interface Props {
   targetLang: string;
   onSourceLangChange: (lang: string) => void;
   onTargetLangChange: (lang: string) => void;
-  onTranslationComplete: (path: string) => void;
   onError: (error: Error) => void;
   onClearStatus: () => void;
 }
@@ -32,7 +31,6 @@ export function VideoExtractor({
   targetLang,
   onSourceLangChange,
   onTargetLangChange,
-  onTranslationComplete,
   onError,
   onClearStatus,
 }: Props) {
@@ -79,21 +77,16 @@ export function VideoExtractor({
         // Get just the filename from the path
         const filename = extractedPath.split('/').pop();
 
-        // Then translate them
-        const { path: translatedPath } = await api.translateSubtitle({
+        // Then queue the translation; TranslationJobs follows its progress
+        return await api.translateSubtitle({
           serie: show,
           season: type === 'series' ? season : null,
           srt_path: filename!,
           source_lang: sourceLang,
           target_lang: targetLang,
           type,
+          update_plex: updatePlex && !!isPlexConfigured,
         });
-
-        if (updatePlex && await PlexService.isConfigured()) {
-          await PlexService.updateLibrary();
-        }
-
-        return translatedPath;
       } catch (caught: unknown) {
         const error = caught as MutationError;
         console.log('Extraction error:', error);
@@ -108,12 +101,8 @@ export function VideoExtractor({
         throw error;
       }
     },
-    onSuccess: (path: string) => { // Added type annotation to path
-      onTranslationComplete(path);
-      // Wait a bit for DeepL API to update usage stats
-      setTimeout(() => {
-        queryClient.invalidateQueries({ queryKey: ['character-count'] });
-      }, 2000); // 2-second delay
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['jobs'] });
     },
   });
 

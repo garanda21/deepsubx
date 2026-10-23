@@ -21,8 +21,30 @@ export interface VideoFile {
 }
 
 export interface CharacterCount {
-  character_count: number;
-  character_limit: number;
+  provider?: 'deepl' | 'llm';
+  character_count?: number;
+  character_limit?: number;
+  model?: string | null;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+}
+
+export interface TranslationJob {
+  id: string;
+  status: 'queued' | 'running' | 'done' | 'error';
+  file: string;
+  title: string;
+  sourceLang: string;
+  targetLang: string;
+  updatePlex: boolean;
+  progress: { done: number; total: number };
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  path?: string;
+  plex?: 'updated' | 'failed' | 'skipped';
+  plexError?: string;
+  error?: { message: string; status: number; apiDetails: unknown };
 }
 
 export interface Language {
