@@ -12,6 +12,12 @@ RUN npm ci
 # Copy source code
 COPY . .
 
+# Version info shown in the UI, provided by CI
+ARG APP_VERSION=local
+ARG APP_COMMIT=
+ENV VITE_APP_VERSION=$APP_VERSION \
+    VITE_APP_COMMIT=$APP_COMMIT
+
 # Build the application
 RUN npm run build
 

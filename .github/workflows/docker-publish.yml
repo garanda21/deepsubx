@@ -109,6 +109,9 @@ jobs:
           tags: ${{ steps.docker_meta.outputs.tags }}
           labels: ${{ steps.docker_meta.outputs.labels }}
           annotations: ${{ steps.docker_meta.outputs.annotations }}
+          build-args: |
+            APP_VERSION=${{ steps.docker_meta.outputs.version }}
+            APP_COMMIT=${{ github.sha }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha
