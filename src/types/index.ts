@@ -25,6 +25,7 @@ export interface CharacterCount {
   character_count?: number;
   character_limit?: number;
   model?: string | null;
+  fallback_models?: string[];
   prompt_tokens?: number;
   completion_tokens?: number;
 }
@@ -39,6 +40,7 @@ export interface TranslationJob {
   targetLang: string;
   updatePlex: boolean;
   progress: { done: number; total: number };
+  attempts: number;
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;

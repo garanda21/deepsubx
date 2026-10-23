@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { join } from 'path';
 import { existsSync } from 'fs';
 import { getConfigError } from '../services/translator.js';
-import { createTranslationJob, getJob, listJobs } from '../services/jobs.js';
+import { createTranslationJob, getJob, listJobs, retryJob } from '../services/jobs.js';
 import { extractSubtitles } from '../services/ffmpeg.js';
 import { DATA_DIR, MOVIES_DIR } from '../utils/paths.js';
 const router = Router();
@@ -47,6 +47,14 @@ router.post('/translate_subtitle', (req, res) => {
 
 router.get('/jobs', (req, res) => {
   res.json(listJobs());
+});
+
+router.post('/jobs/:id/retry', (req, res) => {
+  try {
+    res.status(202).json(retryJob(req.params.id));
+  } catch (error) {
+    res.status(error.status || 500).json({ message: error.message });
+  }
 });
 
 router.get('/jobs/:id', (req, res) => {

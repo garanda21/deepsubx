@@ -14,7 +14,11 @@ const CONCURRENCY = parseInt(process.env.LLM_CONCURRENCY || '3', 10);
 const TEMPERATURE = parseFloat(process.env.LLM_TEMPERATURE || '0.2');
 const JSON_MODE = process.env.LLM_JSON_MODE !== 'false';
 const REQUEST_TIMEOUT = 180000; // 3 minutes per request
+const FALLBACK_COOLDOWN_MS = 5 * 60 * 1000; // skip a failing model for 5 minutes
 const MAX_HTTP_RETRIES = parseInt(process.env.LLM_MAX_RETRIES || '5', 10);
+
+// Models that recently failed over, mapped to the time they can be used again
+const cooldownUntil = new Map();
 
 // Tokens consumed since the server started (shown in the UI)
 const usage = { prompt_tokens: 0, completion_tokens: 0 };
@@ -33,6 +37,7 @@ export function getLLMUsage() {
   return {
     provider: 'llm',
     model: process.env.LLM_MODEL || null,
+    fallback_models: getModels().slice(1),
     prompt_tokens: usage.prompt_tokens,
     completion_tokens: usage.completion_tokens,
   };
@@ -63,9 +68,17 @@ function loadSystemPrompt(sourceLang, targetLang) {
     .replaceAll('{{TARGET_LANG}}', languageName(targetLang));
 }
 
-async function chatCompletion(systemPrompt, userContent) {
+function getModels() {
+  const fallbacks = (process.env.LLM_FALLBACK_MODELS || '')
+    .split(',')
+    .map(model => model.trim())
+    .filter(Boolean);
+  return [process.env.LLM_MODEL, ...fallbacks];
+}
+
+async function requestCompletion(model, systemPrompt, userContent, maxRetries) {
   const body = {
-    model: process.env.LLM_MODEL,
+    model,
     temperature: TEMPERATURE,
     messages: [
       { role: 'system', content: systemPrompt },
@@ -95,10 +108,10 @@ async function chatCompletion(systemPrompt, userContent) {
     } catch (error) {
       const status = error.response?.status;
       const retryable = !status || status === 429 || status >= 500;
-      if (!retryable || attempt >= MAX_HTTP_RETRIES) {
+      if (!retryable || attempt >= maxRetries) {
         if (error.response) {
           const apiMessage = error.response.data?.error?.message || `API Error (${status})`;
-          const enhanced = new Error(`LLM API error: ${apiMessage}`);
+          const enhanced = new Error(`LLM API error (${model}): ${apiMessage}`);
           enhanced.status = status;
           enhanced.apiDetails = error.response.data;
           throw enhanced;
@@ -111,8 +124,31 @@ async function chatCompletion(systemPrompt, userContent) {
       // Honor Retry-After when present, otherwise exponential backoff capped at 30s
       const retryAfter = parseInt(error.response?.headers?.['retry-after'], 10);
       const delay = retryAfter > 0 ? retryAfter * 1000 : Math.min(2000 * 2 ** (attempt - 1), 30000);
-      console.warn(`LLM request failed (${status || error.code}), retrying in ${delay / 1000}s...`);
+      console.warn(`LLM request to ${model} failed (${status || error.code}), retrying in ${delay / 1000}s...`);
       await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
+/**
+ * Sends a chat request, falling back to LLM_FALLBACK_MODELS in order when a
+ * model keeps failing. Models with a fallback after them fail over quickly,
+ * and a model that failed over is skipped for a while.
+ */
+async function chatCompletion(systemPrompt, userContent) {
+  const models = getModels();
+  for (let i = 0; ; i++) {
+    const isLast = i === models.length - 1;
+    if (!isLast && cooldownUntil.get(models[i]) > Date.now()) continue;
+    try {
+      const content = await requestCompletion(models[i], systemPrompt, userContent, isLast ? MAX_HTTP_RETRIES : 2);
+      cooldownUntil.delete(models[i]);
+      return content;
+    } catch (error) {
+      // Auth errors would fail the same way on every model
+      if (isLast || error.status === 401 || error.status === 403) throw error;
+      cooldownUntil.set(models[i], Date.now() + FALLBACK_COOLDOWN_MS);
+      console.warn(`${error.message}; falling back to ${models[i + 1]} for the next 5 minutes`);
     }
   }
 }
@@ -180,11 +216,14 @@ async function translateBatch(systemPrompt, entries, context, title) {
  * @param {string[]} texts Texts to translate
  * @param {string} sourceLang Source language code
  * @param {string} targetLang Target language code
- * @param {{title?: string, onProgress?: (done: number, total: number) => void}} options
- *   Extra context for the model and a batch progress callback
+ * @param {object} options
+ * @param {string} [options.title] Title of the work, as context for the model
+ * @param {(done: number, total: number) => void} [options.onProgress] Batch progress callback
+ * @param {Array<string|undefined>} [options.partial] Translations from a previous
+ *   failed run; filled in as batches complete so a retry skips finished batches
  * @returns {Promise<string[]>} Translations in the same order
  */
-export async function translateTextsLLM(texts, sourceLang, targetLang, { title, onProgress } = {}) {
+export async function translateTextsLLM(texts, sourceLang, targetLang, { title, onProgress, partial = [] } = {}) {
   const systemPrompt = loadSystemPrompt(sourceLang, targetLang);
   const entries = texts.map((t, i) => ({ i, t }));
 
@@ -196,21 +235,32 @@ export async function translateTextsLLM(texts, sourceLang, targetLang, { title, 
       context: entries.slice(Math.max(0, start - CONTEXT_SIZE), start),
     });
   }
-  console.log(`Translating ${texts.length} texts with ${process.env.LLM_MODEL} in ${batches.length} batch(es)`);
 
-  const results = new Array(batches.length);
+  const isDone = (batch) => batch.entries.every(({ i }) => partial[i] !== undefined);
+  const pending = batches.filter(batch => !isDone(batch));
+  let done = batches.length - pending.length;
+  console.log(`Translating ${texts.length} texts with ${getModels().join(' > ')} in ${batches.length} batch(es)`
+    + (done > 0 ? `, resuming with ${done} already done` : ''));
+  onProgress?.(done, batches.length);
+
+  // On the first failure, stop taking new batches and let in-flight ones finish
+  let failure = null;
   let next = 0;
-  let done = 0;
-  onProgress?.(0, batches.length);
   const worker = async () => {
-    while (next < batches.length) {
-      const index = next++;
-      results[index] = await translateBatch(systemPrompt, batches[index].entries, batches[index].context, title);
-      console.log(`LLM batch ${++done}/${batches.length} done`);
-      onProgress?.(done, batches.length);
+    while (!failure && next < pending.length) {
+      const batch = pending[next++];
+      try {
+        const translated = await translateBatch(systemPrompt, batch.entries, batch.context, title);
+        batch.entries.forEach(({ i }, k) => { partial[i] = translated[k]; });
+        console.log(`LLM batch ${++done}/${batches.length} done`);
+        onProgress?.(done, batches.length);
+      } catch (error) {
+        failure ??= error;
+      }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, batches.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, pending.length) }, worker));
+  if (failure) throw failure;
 
-  return results.flat();
+  return texts.map((_, i) => partial[i]);
 }

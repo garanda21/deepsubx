@@ -62,6 +62,7 @@ The application offers optional integration with a Plex server, allowing you to 
 | `LLM_BASE_URL`  | OpenAI-compatible API base URL (default `https://api.openai.com/v1`) | Optional |
 | `LLM_API_KEY`   | API key for the LLM endpoint              | Yes, with `llm` (except local servers) |
 | `LLM_MODEL`     | Model name, e.g. `gpt-4.1`, `anthropic/claude-sonnet-5-5` | Yes, with `llm` |
+| `LLM_FALLBACK_MODELS` | Comma-separated models tried in order when `LLM_MODEL` keeps failing | Optional |
 | `LLM_BATCH_SIZE` | Subtitles per request (default `25`)     | Optional |
 | `LLM_CONTEXT_SIZE` | Previous lines sent as context (default `5`) | Optional |
 | `LLM_CONCURRENCY` | Parallel requests (default `3`)         | Optional |
@@ -97,6 +98,18 @@ and numbering are never altered.
 | Anthropic (OpenAI SDK compatibility) | `https://api.anthropic.com/v1` | `claude-sonnet-5-5` |
 | LiteLLM proxy | `http://litellm:4000/v1` | any model configured in LiteLLM |
 | Ollama | `http://ollama:11434/v1` | `qwen2.5:14b` |
+
+### Fallback models and resuming
+
+Free models often fail with rate limits or provider errors. Set `LLM_FALLBACK_MODELS` to a
+comma-separated list of models to try in order; a model that fails over is skipped for the
+next 5 minutes. Translations run as background jobs, and if a job still fails, the
+**Resume translation** button continues from the last finished batch instead of starting over.
+
+```env
+LLM_MODEL=google/gemma-4-26b-a4b-it:free
+LLM_FALLBACK_MODELS=nvidia/nemotron-3.5-super-vl:free,dots-studio/dots-3-note-preview:free
+```
 
 ### Custom system prompt
 
