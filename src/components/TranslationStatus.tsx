@@ -1,3 +1,4 @@
+import type { ApiErrorResponse } from '../types';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export interface Props {
@@ -33,7 +34,7 @@ export function TranslationStatus({ isSuccess, isError, error, data }: Props) {
       errorMessage = error.message;
       
       // Check if this is our enhanced API error with details
-      const apiError = error as any;
+      const apiError = error as Error & Partial<ApiErrorResponse>;
       if (apiError.apiDetails || apiError.deeplRequest) {
         technicalDetails = JSON.stringify({
           apiDetails: apiError.apiDetails,
@@ -58,7 +59,7 @@ export function TranslationStatus({ isSuccess, isError, error, data }: Props) {
           {technicalDetails && (
             <details className="mt-2">
               <summary className="cursor-pointer text-xs font-medium text-red-700">Technical details</summary>
-              <pre className="mt-2 max-h-40 overflow-auto rounded bg-red-100 p-2 text-xs text-red-800">
+              <pre className="mt-2 max-h-40 overflow-auto rounded-sm bg-red-100 p-2 text-xs text-red-800">
                 {technicalDetails}
               </pre>
             </details>

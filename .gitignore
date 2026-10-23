@@ -3,3 +3,6 @@ old
 dist
 .DS_Store
 @eaDir
+.vscode/
+data/
+*.tsbuildinfo
