@@ -1,3 +1,5 @@
+import type { AxiosError } from 'axios';
+
 export interface Show {
   name: string;
   seasons: string[];
@@ -35,8 +37,15 @@ export interface ApiErrorResponse {
   message: string; // User-friendly error message
   status: number; // HTTP status code
   originalError: string; // Original error message or toString
-  apiDetails?: any; // Additional API details if available
-  deeplRequest?: any; // DeepL specific request details
+  apiDetails?: unknown; // Additional API details if available
+  deeplRequest?: unknown; // DeepL specific request details
   isLargeFile?: boolean; // Flag for large file errors
-  axiosError?: any; // Original axios error object
+  axiosError?: AxiosError; // Original axios error object
 }
+/**
+ * Shape of errors caught in mutations: either the interceptor's
+ * ApiErrorResponse or a raw axios-like error with a response body.
+ */
+export type MutationError = Partial<ApiErrorResponse> & {
+  response?: { data?: { message?: string } };
+};

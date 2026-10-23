@@ -1,3 +1,4 @@
+import type { MutationError } from '../types';
 import { FileSelect } from './FileSelect';
 import { LanguageSelect } from './LanguageSelect';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -93,10 +94,11 @@ export function VideoExtractor({
         }
 
         return translatedPath;
-      } catch (error: any) { // Added type annotation to error
+      } catch (caught: unknown) {
+        const error = caught as MutationError;
         console.log('Extraction error:', error);
         if (error.response) {
-          const originalMessage = error.response.data.message;
+          const originalMessage = error.response.data?.message;
           onError(new Error(originalMessage));
         } else if (error instanceof Error) {
           onError(error);
@@ -161,7 +163,7 @@ export function VideoExtractor({
             id="update-plex"
             checked={updatePlex}
             onChange={(e) => setUpdatePlex(e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300"
+            className="h-4 w-4 rounded-sm border-gray-300"
           />
           <label htmlFor="update-plex" className="ml-2 text-sm text-gray-600">
             Update Plex library after translation

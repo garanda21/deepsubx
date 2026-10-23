@@ -8,7 +8,7 @@ const api = axios.create({
 // Add response interceptor to standardize error handling
 api.interceptors.response.use(
   (response: AxiosResponse): AxiosResponse => response,
-  (error: AxiosError): Promise<never> => {
+  (error: AxiosError<Partial<ApiErrorResponse>>): Promise<never> => {
     // Create a standardized error object
     const enhancedError: ApiErrorResponse = {
       message: error.response?.data?.message || error.message || 'Unknown error occurred',

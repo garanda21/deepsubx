@@ -34,7 +34,7 @@ export async function translateDocument({
     }
 
     // 3. Download translated document
-    const translatedContent = await downloadDocument(document_id, document_key);
+    await downloadDocument(document_id, document_key);
     
     // Return the path where the file was saved
     return `${filePath}.${targetLang.toLowerCase()}.srt`;
@@ -42,6 +42,6 @@ export async function translateDocument({
     if (error instanceof Error) {
       throw error;
     }
-    throw new Error('Translation failed');
+    throw new Error('Translation failed', { cause: error });
   }
 }
