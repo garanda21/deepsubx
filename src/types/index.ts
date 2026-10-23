@@ -34,6 +34,7 @@ export interface TranslationJob {
   status: 'queued' | 'running' | 'done' | 'error';
   file: string;
   title: string;
+  season: string | null;
   sourceLang: string;
   targetLang: string;
   updatePlex: boolean;

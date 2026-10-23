@@ -47,6 +47,19 @@ export function SubtitleTranslator({
     queryKey: ['plexStatus'],
     queryFn: () => PlexService.isConfigured(),
   });
+  // Shares the cache polled by TranslationJobs
+  const { data: jobs } = useQuery({
+    queryKey: ['jobs'],
+    queryFn: api.getJobs,
+  });
+  const isAlreadyTranslating = !!jobs?.some(job =>
+    (job.status === 'queued' || job.status === 'running')
+    && job.title === show
+    && job.season === (type === 'series' ? season : null)
+    && job.file === subtitlePath
+    && job.targetLang === targetLang
+  );
+
   const translateMutation = useMutation({
     mutationFn: async () => {
       onClearStatus();
@@ -155,10 +168,12 @@ export function SubtitleTranslator({
 
       <button
         onClick={() => translateMutation.mutate()}
-        disabled={isLoading || !subtitlePath || !sourceLang || !targetLang}
+        disabled={isLoading || isAlreadyTranslating || !subtitlePath || !sourceLang || !targetLang}
         className="w-full rounded-lg bg-blue-600 px-4 py-3 font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-300"
       >
-        {isLoading ? 'Starting translation...' : 'Translate Subtitle'}
+        {isLoading
+          ? 'Starting translation...'
+          : isAlreadyTranslating ? 'Already translating to this language' : 'Translate Subtitle'}
       </button>
     </div>
   );

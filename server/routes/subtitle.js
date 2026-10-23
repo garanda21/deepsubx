@@ -30,14 +30,19 @@ router.post('/translate_subtitle', (req, res) => {
   }
 
   // Translation can take minutes with an LLM, so it runs as a background job
-  const job = createTranslationJob({
-    subtitlePath,
-    sourceLang: source_lang,
-    targetLang: target_lang,
-    title: serie,
-    updatePlex: update_plex,
-  });
-  res.status(202).json(job);
+  try {
+    const job = createTranslationJob({
+      subtitlePath,
+      sourceLang: source_lang,
+      targetLang: target_lang,
+      title: serie,
+      season: type === 'series' ? season : null,
+      updatePlex: update_plex,
+    });
+    res.status(202).json(job);
+  } catch (error) {
+    res.status(error.status || 500).json({ message: error.message });
+  }
 });
 
 router.get('/jobs', (req, res) => {
