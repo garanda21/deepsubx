@@ -1,7 +1,15 @@
 import fs from 'fs';
+import { createHash } from 'crypto';
 import { parseSRT, stringifySRT } from '../utils/srt.js';
 import { buildTextBatches, getTranslatedFilePath, getUsageStats, translateTexts } from './deepl.js';
 import { getLLMConfigError, getLLMUsage, translateTextsLLM } from './llm.js';
+
+// Hash of the source texts each saved `partial` array was built from
+const partialSources = new WeakMap();
+
+function hashTexts(texts) {
+  return createHash('sha256').update(JSON.stringify(texts)).digest('hex');
+}
 
 export function getProvider() {
   return (process.env.TRANSLATION_PROVIDER || 'deepl').toLowerCase() === 'llm' ? 'llm' : 'deepl';
@@ -91,9 +99,16 @@ export async function translateSRT(filePath, sourceLang, targetLang, options = {
   const texts = toTranslate.map(item => item.text);
 
   // Discard saved progress if the file changed since the failed run
-  if (options.partial && options.partial.length !== texts.length) {
-    options.partial.length = 0;
-    options.partial.length = texts.length;
+  if (options.partial) {
+    const sourceHash = hashTexts(texts);
+    if (partialSources.get(options.partial) !== sourceHash) {
+      if (options.partial.some(text => text !== undefined)) {
+        console.log('Subtitle file changed since the last attempt, starting over');
+      }
+      options.partial.length = 0;
+      options.partial.length = texts.length;
+      partialSources.set(options.partial, sourceHash);
+    }
   }
 
   const translatedTexts = provider === 'llm'

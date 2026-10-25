@@ -122,10 +122,14 @@ router.post('/extract_subtitles', async (req, res) => {
     await extractSubtitles(videoPath, outputPath);
     res.json({ path: outputPath });
   } catch (error) {
+    // Full error stays in the server log; ffmpeg messages contain absolute paths
     console.error('Error extracting subtitles:', error);
     
     // Format a user-friendly error message with technical details
-    let userMessage = 'Failed to extract subtitles: ' + (error.message || 'Unknown error');
+    const safeMessage = (error.message || 'Unknown error')
+      .replaceAll(resolve(DATA_DIR), '<data>')
+      .replaceAll(resolve(MOVIES_DIR), '<movies>');
+    let userMessage = 'Failed to extract subtitles: ' + safeMessage;
     let statusCode = 500;
     
     // Handle specific ffmpeg errors
@@ -137,10 +141,7 @@ router.post('/extract_subtitles', async (req, res) => {
       statusCode = 422;
     }
     
-    res.status(statusCode).json({ 
-      message: userMessage,        
-      originalError: error.toString()
-    });
+    res.status(statusCode).json({ message: userMessage });
   }
 });
 

@@ -31,6 +31,7 @@ const TEMPERATURE = numberFromEnv('LLM_TEMPERATURE', 0.2, { min: 0, integer: fal
 const JSON_MODE = process.env.LLM_JSON_MODE !== 'false';
 const REQUEST_TIMEOUT = 180000; // 3 minutes per request
 const FALLBACK_COOLDOWN_MS = 5 * 60 * 1000; // skip a failing model for 5 minutes
+const MAX_RETRY_AFTER_S = 60; // never sleep longer than this on a Retry-After header
 const MAX_HTTP_RETRIES = numberFromEnv('LLM_MAX_RETRIES', 5, { min: 1 });
 
 // Models that recently failed over, mapped to the time they can be used again
@@ -106,21 +107,15 @@ async function requestCompletion(model, systemPrompt, userContent, maxRetries) {
   }
 
   for (let attempt = 1; ; attempt++) {
+    let response;
     try {
-      const response = await axios.post(`${BASE_URL}/chat/completions`, body, {
+      response = await axios.post(`${BASE_URL}/chat/completions`, body, {
         headers: {
           'Content-Type': 'application/json',
           ...(process.env.LLM_API_KEY && { Authorization: `Bearer ${process.env.LLM_API_KEY}` }),
         },
         timeout: REQUEST_TIMEOUT,
       });
-      usage.prompt_tokens += response.data.usage?.prompt_tokens || 0;
-      usage.completion_tokens += response.data.usage?.completion_tokens || 0;
-      const content = response.data.choices?.[0]?.message?.content;
-      if (typeof content !== 'string') {
-        throw new Error('LLM response has no message content');
-      }
-      return content;
     } catch (error) {
       const status = error.response?.status;
       const retryable = !status || status === 429 || status >= 500;
@@ -137,19 +132,32 @@ async function requestCompletion(model, systemPrompt, userContent, maxRetries) {
         enhanced.status = 503;
         throw enhanced;
       }
-      // Honor Retry-After when present, otherwise exponential backoff capped at 30s
+      // Honor Retry-After when present (capped), otherwise exponential backoff capped at 30s
       const retryAfter = parseInt(error.response?.headers?.['retry-after'], 10);
-      const delay = retryAfter > 0 ? retryAfter * 1000 : Math.min(2000 * 2 ** (attempt - 1), 30000);
+      const delay = retryAfter > 0
+        ? Math.min(retryAfter, MAX_RETRY_AFTER_S) * 1000
+        : Math.min(2000 * 2 ** (attempt - 1), 30000);
       console.warn(`LLM request to ${model} failed (${status || error.code}), retrying in ${delay / 1000}s...`);
       await new Promise((resolve) => setTimeout(resolve, delay));
+      continue;
     }
+
+    usage.prompt_tokens += response.data.usage?.prompt_tokens || 0;
+    usage.completion_tokens += response.data.usage?.completion_tokens || 0;
+    const content = response.data.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || content.trim() === '') {
+      // No .status: handled as a malformed response (retry, then split the batch)
+      throw new Error(`LLM response from ${model} has no message content`);
+    }
+    return content;
   }
 }
 
 /**
  * Sends a chat request, falling back to LLM_FALLBACK_MODELS in order when a
- * model keeps failing. Models with a fallback after them fail over quickly,
- * and a model that failed over is skipped for a while.
+ * model keeps failing. Models with a fallback after them fail over quickly.
+ * Only signs of an unhealthy model (429, 5xx, network) put it on cooldown;
+ * other HTTP errors (e.g. a 400 for one request) fall back for that request only.
  */
 async function chatCompletion(systemPrompt, userContent) {
   const models = getModels();
@@ -161,10 +169,15 @@ async function chatCompletion(systemPrompt, userContent) {
       cooldownUntil.delete(models[i]);
       return content;
     } catch (error) {
-      // Auth errors would fail the same way on every model
-      if (isLast || error.status === 401 || error.status === 403) throw error;
-      cooldownUntil.set(models[i], Date.now() + FALLBACK_COOLDOWN_MS);
-      console.warn(`${error.message}; falling back to ${models[i + 1]} for the next 5 minutes`);
+      // Malformed responses (no .status) are handled by translateBatch, and
+      // auth errors would fail the same way on every model
+      if (isLast || !error.status || error.status === 401 || error.status === 403) throw error;
+      const unhealthy = error.status === 429 || error.status >= 500;
+      if (unhealthy) {
+        cooldownUntil.set(models[i], Date.now() + FALLBACK_COOLDOWN_MS);
+      }
+      console.warn(`${error.message}; falling back to ${models[i + 1]}`
+        + (unhealthy ? ' for the next 5 minutes' : ' for this request'));
     }
   }
 }
