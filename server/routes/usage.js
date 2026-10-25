@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import { getUsageStats } from '../services/deepl.js';
+import { getUsage } from '../services/translator.js';
 
 const router = Router();
 
 router.get('/get_character_count', async (req, res) => {
   try {
-    const stats = await getUsageStats();
+    const stats = await getUsage();
     res.json(stats);
   } catch (error) {
     res.status(500).json({ 

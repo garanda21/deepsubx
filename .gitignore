@@ -7,3 +7,6 @@ dist
 data/
 *.tsbuildinfo
 .smbdelete*
+
+# Local secrets
+.env

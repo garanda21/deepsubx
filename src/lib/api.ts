@@ -1,5 +1,5 @@
 import axios, { AxiosResponse, AxiosError } from 'axios';
-import type { CharacterCount, Show, Movie, SubtitleFile, VideoFile, ApiErrorResponse } from '../types';
+import type { CharacterCount, Show, Movie, SubtitleFile, VideoFile, ApiErrorResponse, TranslationJob } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -96,6 +96,10 @@ export const extractSubtitles = async (params: {
   }
 };
 
+/**
+ * Queues a translation on the server and returns the job right away.
+ * Progress is followed with getJobs().
+ */
 export const translateSubtitle = async (params: {
   serie: string;
   season?: string | null;
@@ -103,15 +107,21 @@ export const translateSubtitle = async (params: {
   source_lang: string;
   target_lang: string;
   type: 'series' | 'movies';
-}): Promise<{ path: string }> => {
-  try {
-    const { data } = await api.post('/translate_subtitle', params);
-    return data;
-  } catch (error) {
-    console.error('Translation error:', error);
-    // Re-throw the error for handling in the UI components
-    throw error;
-  }
+  update_plex: boolean;
+}): Promise<TranslationJob> => {
+  const { data } = await api.post<TranslationJob>('/translate_subtitle', params);
+  return data;
+};
+
+/** Requeues a failed job; batches finished before the failure are kept. */
+export const retryJob = async (id: string): Promise<TranslationJob> => {
+  const { data } = await api.post<TranslationJob>(`/jobs/${id}/retry`);
+  return data;
+};
+
+export const getJobs = async (): Promise<TranslationJob[]> => {
+  const { data } = await api.get<TranslationJob[]>('/jobs');
+  return data;
 };
 
 export async function isPlexConfigured(): Promise<boolean> {
