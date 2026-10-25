@@ -8,13 +8,29 @@ function sanitizeText(text) {
     .replace(/\u00A0/g, ' '); // non-breaking space → regular space
 }
 
+const TIMECODE_LINE = /^\s*\S+\s+-->\s+\S+/;
+
 export function parseSRT(content) {
-    const blocks = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n\n');
-    return blocks.map((block) => {
-      const [id, timeCode, ...textLines] = block.split('\n');
-      const [startTime, endTime] = timeCode.split(' --> ');
+    const lines = content.replace(/^﻿/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+
+    // A block starts at a numeric id followed by a timecode line. Finding blocks
+    // this way (instead of splitting on blank lines) keeps blocks with empty text.
+    const starts = [];
+    for (let i = 1; i < lines.length; i++) {
+      if (TIMECODE_LINE.test(lines[i]) && /^\d+$/.test(lines[i - 1].trim())) {
+        starts.push(i - 1);
+      }
+    }
+
+    return starts.map((start, n) => {
+      const end = n + 1 < starts.length ? starts[n + 1] : lines.length;
+      const textLines = lines.slice(start + 2, end);
+      while (textLines.length > 0 && textLines[textLines.length - 1].trim() === '') {
+        textLines.pop();
+      }
+      const [startTime, endTime] = lines[start + 1].split(' --> ').map(part => part.trim());
       return {
-        id: parseInt(id),
+        id: parseInt(lines[start].trim()),
         startTime,
         endTime,
         text: sanitizeText(textLines.join('\n')),
