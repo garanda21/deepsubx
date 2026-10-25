@@ -122,10 +122,14 @@ export function TranslationJobs() {
   const activeCount = jobs?.filter(isActive).length ?? 0;
   const previousActive = useRef(activeCount);
   useEffect(() => {
-    if (activeCount < previousActive.current) {
-      queryClient.invalidateQueries({ queryKey: ['character-count'] });
-    }
+    const finished = activeCount < previousActive.current;
     previousActive.current = activeCount;
+    if (!finished) return;
+    // Wait a bit for DeepL API to update usage stats
+    const timer = setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ['character-count'] });
+    }, 2000);
+    return () => clearTimeout(timer);
   }, [activeCount, queryClient]);
 
   if (!jobs?.length) return null;
