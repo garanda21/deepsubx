@@ -102,8 +102,12 @@ and numbering are never altered.
 ### Fallback models and resuming
 
 Free models often fail with rate limits or provider errors. Set `LLM_FALLBACK_MODELS` to a
-comma-separated list of models to try in order; a model that fails over is skipped for the
-next 5 minutes. Translations run as background jobs, and if a job still fails, the
+comma-separated list of models to try in order. When fallbacks are configured, each model
+before the last one gets only 2 attempts (so a rate-limited free model hands over quickly),
+the last one gets `LLM_MAX_RETRIES`, and a model that fails over is skipped for the next
+5 minutes. Any error except an authentication error (401/403) triggers a fallback, including
+a 400 from a model that rejects `response_format`; set `LLM_JSON_MODE=false` if your models
+do not support JSON mode. Translations run as background jobs, and if a job still fails, the
 **Resume translation** button continues from the last finished batch instead of starting over.
 
 ```env

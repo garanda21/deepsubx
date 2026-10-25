@@ -8,14 +8,30 @@ const DEFAULT_PROMPT_PATH = join(__dirname, '..', 'prompts', 'llm-system-prompt.
 const CUSTOM_PROMPT_PATH = process.env.LLM_PROMPT_FILE || '/config/llm-system-prompt.txt';
 
 const BASE_URL = (process.env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '');
-const BATCH_SIZE = parseInt(process.env.LLM_BATCH_SIZE || '25', 10);
-const CONTEXT_SIZE = parseInt(process.env.LLM_CONTEXT_SIZE || '5', 10);
-const CONCURRENCY = parseInt(process.env.LLM_CONCURRENCY || '3', 10);
-const TEMPERATURE = parseFloat(process.env.LLM_TEMPERATURE || '0.2');
+
+/**
+ * Reads a numeric env var, falling back to the default when it is missing,
+ * not a number or below the minimum (e.g. LLM_BATCH_SIZE=0 would loop forever).
+ */
+function numberFromEnv(name, defaultValue, { min, integer = true }) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return defaultValue;
+  const value = integer ? Number.parseInt(raw, 10) : Number.parseFloat(raw);
+  if (!Number.isFinite(value) || value < min) {
+    console.warn(`Invalid ${name}="${raw}", using default ${defaultValue}`);
+    return defaultValue;
+  }
+  return value;
+}
+
+const BATCH_SIZE = numberFromEnv('LLM_BATCH_SIZE', 25, { min: 1 });
+const CONTEXT_SIZE = numberFromEnv('LLM_CONTEXT_SIZE', 5, { min: 0 });
+const CONCURRENCY = numberFromEnv('LLM_CONCURRENCY', 3, { min: 1 });
+const TEMPERATURE = numberFromEnv('LLM_TEMPERATURE', 0.2, { min: 0, integer: false });
 const JSON_MODE = process.env.LLM_JSON_MODE !== 'false';
 const REQUEST_TIMEOUT = 180000; // 3 minutes per request
 const FALLBACK_COOLDOWN_MS = 5 * 60 * 1000; // skip a failing model for 5 minutes
-const MAX_HTTP_RETRIES = parseInt(process.env.LLM_MAX_RETRIES || '5', 10);
+const MAX_HTTP_RETRIES = numberFromEnv('LLM_MAX_RETRIES', 5, { min: 1 });
 
 // Models that recently failed over, mapped to the time they can be used again
 const cooldownUntil = new Map();
@@ -195,7 +211,10 @@ async function translateBatch(systemPrompt, entries, context, title) {
       }
       return entries.map(({ i }) => byId.get(i));
     } catch (error) {
-      if (error.status) throw error; // HTTP errors were already retried
+      // Contract: errors with a .status come from requestCompletion (HTTP errors,
+      // or 503 for network failures) and were already retried there. Splitting
+      // the batch would not help, so they bypass the retry/split path.
+      if (error.status) throw error;
       lastError = error;
       console.warn(`Invalid LLM batch response (attempt ${attempt}): ${error.message}`);
     }

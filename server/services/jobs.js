@@ -4,6 +4,7 @@ import { translateSRT } from './translator.js';
 import { isConfigured as isPlexConfigured, updateLibrary } from './plexService.js';
 
 const MAX_FINISHED_JOBS = 20;
+const MAX_FAILED_JOBS = 50; // failed jobs keep resume progress, so they are pruned last
 
 // In-memory job store: survives page reloads, not server restarts
 const jobs = new Map();
@@ -33,11 +34,22 @@ function assertNotDuplicate(subtitlePath, targetLang, exceptId) {
   }
 }
 
-function pruneFinished() {
-  const finished = [...jobs.values()].filter(job => !isActive(job));
-  for (const job of finished.slice(0, Math.max(0, finished.length - MAX_FINISHED_JOBS))) {
+function pruneOldest(list, keep) {
+  for (const job of list.slice(0, Math.max(0, list.length - keep))) {
     jobs.delete(job.id);
   }
+}
+
+/**
+ * Drops the oldest finished jobs. Completed jobs go first; failed jobs hold
+ * resumable progress and get a separate, larger limit.
+ */
+function pruneFinished() {
+  const all = [...jobs.values()];
+  const done = all.filter(job => job.status === 'done');
+  const failed = all.filter(job => job.status === 'error');
+  pruneOldest(done, Math.max(0, MAX_FINISHED_JOBS - failed.length));
+  pruneOldest(failed, MAX_FAILED_JOBS);
 }
 
 async function runJob(job) {
@@ -81,11 +93,18 @@ async function runJob(job) {
 async function processQueue() {
   if (running) return;
   running = true;
-  while (queue.length > 0) {
-    await runJob(queue.shift());
-    pruneFinished();
+  try {
+    while (queue.length > 0) {
+      await runJob(queue.shift());
+      pruneFinished();
+    }
+  } catch (error) {
+    // processQueue is not awaited, so log instead of leaving an unhandled rejection
+    console.error('Translation queue stopped unexpectedly:', error);
+  } finally {
+    // Never leave the queue stuck if something unexpected throws
+    running = false;
   }
-  running = false;
 }
 
 /**
@@ -136,8 +155,13 @@ export function retryJob(id) {
 
   job.status = 'queued';
   job.attempts += 1;
+  // Clear state from the previous attempt; progress is kept in job.partial
   delete job.error;
+  delete job.startedAt;
   delete job.finishedAt;
+  delete job.path;
+  delete job.plex;
+  delete job.plexError;
   // Move it to the end so it shows up as the most recent job
   jobs.delete(job.id);
   jobs.set(job.id, job);
