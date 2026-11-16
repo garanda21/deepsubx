@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { resolve, sep } from 'path';
 import { existsSync } from 'fs';
 import { getConfigError } from '../services/translator.js';
-import { createTranslationJob, getJob, listJobs, retryJob } from '../services/jobs.js';
+import { clearFinishedJobs, createTranslationJob, dismissJob, getJob, listJobs, retryJob } from '../services/jobs.js';
 import { extractSubtitles } from '../services/ffmpeg.js';
 import { DATA_DIR, MOVIES_DIR } from '../utils/paths.js';
 const router = Router();
@@ -74,6 +74,20 @@ router.post('/translate_subtitle', (req, res) => {
 
 router.get('/jobs', (req, res) => {
   res.json(listJobs());
+});
+
+// Removes all finished (done or failed) jobs
+router.delete('/jobs', (req, res) => {
+  res.json({ removed: clearFinishedJobs() });
+});
+
+router.delete('/jobs/:id', (req, res) => {
+  try {
+    dismissJob(req.params.id);
+    res.status(204).end();
+  } catch (error) {
+    res.status(error.status || 500).json({ message: error.message });
+  }
 });
 
 router.post('/jobs/:id/retry', (req, res) => {

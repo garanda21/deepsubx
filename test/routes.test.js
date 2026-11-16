@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import express from 'express';
-import { mockAxiosPost, deeplResponse, makeTempDir, writeSRT } from './helpers.js';
+import { mockAxiosPost, deeplResponse, makeTempDir, writeSRT, sleep } from './helpers.js';
 
 // paths.js reads the media directories at import time
 const dataDir = makeTempDir();
@@ -85,4 +85,21 @@ test('rejects path traversal in extract_subtitles', async () => {
 
   assert.equal(response.status, 400);
   assert.match(response.body.message, /Invalid video path/);
+});
+
+test('dismisses a job and clears finished jobs', async () => {
+  mockAxiosPost((url, body) => deeplResponse(body));
+  const { body: job } = await post('/translate_subtitle', { ...valid, target_lang: 'IT' });
+  while ((await (await fetch(`${baseUrl}/jobs/${job.id}`)).json()).status !== 'done') {
+    await sleep(10);
+  }
+
+  const dismissed = await fetch(`${baseUrl}/jobs/${job.id}`, { method: 'DELETE' });
+  assert.equal(dismissed.status, 204);
+  assert.equal((await fetch(`${baseUrl}/jobs/${job.id}`)).status, 404);
+  assert.equal((await fetch(`${baseUrl}/jobs/${job.id}`, { method: 'DELETE' })).status, 404);
+
+  const cleared = await (await fetch(`${baseUrl}/jobs`, { method: 'DELETE' })).json();
+  assert.equal(typeof cleared.removed, 'number');
+  assert.deepEqual(await (await fetch(`${baseUrl}/jobs`)).json(), []);
 });

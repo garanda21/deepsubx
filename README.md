@@ -109,6 +109,8 @@ the last one gets `LLM_MAX_RETRIES`, and a model that fails over is skipped for 
 a 400 from a model that rejects `response_format`; set `LLM_JSON_MODE=false` if your models
 do not support JSON mode. Translations run as background jobs, and if a job still fails, the
 **Resume translation** button continues from the last finished batch instead of starting over.
+Completed jobs disappear from the list after 24 hours; failed jobs stay until they are
+resumed or dismissed. Finished jobs can also be dismissed one by one or with **Clear finished**.
 
 ```env
 LLM_MODEL=google/gemma-4-26b-a4b-it:free
