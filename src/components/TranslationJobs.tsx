@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, CheckCircle2, Clock, Loader2, RotateCw } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock, Loader2, RotateCw, X } from 'lucide-react';
 import * as api from '../lib/api';
 import type { TranslationJob } from '../types';
 
@@ -31,6 +31,26 @@ function JobProgress({ job }: { job: TranslationJob }) {
   );
 }
 
+function DismissButton({ job, className }: { job: TranslationJob; className: string }) {
+  const queryClient = useQueryClient();
+  const dismissMutation = useMutation({
+    mutationFn: () => api.dismissJob(job.id),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['jobs'] }),
+  });
+
+  return (
+    <button
+      onClick={() => dismissMutation.mutate()}
+      disabled={dismissMutation.isPending}
+      className={`absolute right-2 top-2 rounded-full p-1 disabled:opacity-50 ${className}`}
+      title={job.status === 'error' ? 'Dismiss (discards resume progress)' : 'Dismiss'}
+      aria-label="Dismiss"
+    >
+      <X className="h-4 w-4" />
+    </button>
+  );
+}
+
 function JobItem({ job }: { job: TranslationJob }) {
   const queryClient = useQueryClient();
   const retryMutation = useMutation({
@@ -57,7 +77,8 @@ function JobItem({ job }: { job: TranslationJob }) {
 
   if (job.status === 'done') {
     return (
-      <div className="rounded-lg bg-green-50 p-4 flex items-start gap-3">
+      <div className="relative rounded-lg bg-green-50 p-4 pr-10 flex items-start gap-3">
+        <DismissButton job={job} className="text-green-700 hover:bg-green-100" />
         <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
         <div className="min-w-0">
           <div className="font-medium text-green-800">Translation Complete!</div>
@@ -70,7 +91,8 @@ function JobItem({ job }: { job: TranslationJob }) {
   }
 
   return (
-    <div className="rounded-lg bg-red-50 p-4 flex items-start gap-3">
+    <div className="relative rounded-lg bg-red-50 p-4 pr-10 flex items-start gap-3">
+      <DismissButton job={job} className="text-red-700 hover:bg-red-100" />
       <AlertCircle className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
       <div className="w-full min-w-0">
         <div className="font-medium text-red-800">Translation Failed</div>
@@ -108,7 +130,8 @@ function JobItem({ job }: { job: TranslationJob }) {
 
 /**
  * Lists translation jobs kept by the server, so progress survives page reloads.
- * Polls only while a job is queued or running.
+ * Polls only while a job is queued or running. Completed jobs expire on the
+ * server after a day; finished jobs can also be dismissed here.
  */
 export function TranslationJobs() {
   const queryClient = useQueryClient();
@@ -119,6 +142,11 @@ export function TranslationJobs() {
   });
 
   // Refresh API usage whenever a job finishes
+  const clearMutation = useMutation({
+    mutationFn: api.clearFinishedJobs,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['jobs'] }),
+  });
+
   const activeCount = jobs?.filter(isActive).length ?? 0;
   const previousActive = useRef(activeCount);
   useEffect(() => {
@@ -134,8 +162,21 @@ export function TranslationJobs() {
 
   if (!jobs?.length) return null;
 
+  const finishedCount = jobs.length - activeCount;
+
   return (
     <div className="space-y-3">
+      {finishedCount > 0 && (
+        <div className="flex justify-end">
+          <button
+            onClick={() => clearMutation.mutate()}
+            disabled={clearMutation.isPending}
+            className="text-sm font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+          >
+            Clear finished ({finishedCount})
+          </button>
+        </div>
+      )}
       {jobs.slice(0, 5).map(job => <JobItem key={job.id} job={job} />)}
     </div>
   );

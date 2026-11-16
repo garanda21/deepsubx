@@ -5,6 +5,7 @@ import { isConfigured as isPlexConfigured, updateLibrary } from './plexService.j
 
 const MAX_FINISHED_JOBS = 20;
 const MAX_FAILED_JOBS = 50; // failed jobs keep resume progress, so they are pruned last
+const DONE_JOB_TTL_MS = 24 * 60 * 60 * 1000; // completed jobs disappear after a day
 
 // In-memory job store: survives page reloads, not server restarts
 const jobs = new Map();
@@ -41,10 +42,23 @@ function pruneOldest(list, keep) {
 }
 
 /**
+ * Drops completed jobs older than DONE_JOB_TTL_MS. Failed jobs are kept until
+ * they are retried or dismissed, since they hold resumable progress.
+ */
+function dropExpired(now = Date.now()) {
+  for (const job of jobs.values()) {
+    if (job.status === 'done' && now - Date.parse(job.finishedAt) > DONE_JOB_TTL_MS) {
+      jobs.delete(job.id);
+    }
+  }
+}
+
+/**
  * Drops the oldest finished jobs. Completed jobs go first; failed jobs hold
  * resumable progress and get a separate, larger limit.
  */
 function pruneFinished() {
+  dropExpired();
   const all = [...jobs.values()];
   const done = all.filter(job => job.status === 'done');
   const failed = all.filter(job => job.status === 'error');
@@ -171,11 +185,47 @@ export function retryJob(id) {
 }
 
 export function getJob(id) {
+  dropExpired();
   const job = jobs.get(id);
   return job ? toPublic(job) : null;
 }
 
 /** Most recent first. */
 export function listJobs() {
+  dropExpired();
   return [...jobs.values()].reverse().map(toPublic);
+}
+
+/**
+ * Removes a finished (done or failed) job. Dismissing a failed job discards
+ * its resume progress.
+ */
+export function dismissJob(id) {
+  const job = jobs.get(id);
+  if (!job) {
+    const error = new Error('Job not found');
+    error.status = 404;
+    throw error;
+  }
+  if (isActive(job)) {
+    const error = new Error('Active jobs cannot be dismissed');
+    error.status = 409;
+    throw error;
+  }
+  jobs.delete(id);
+}
+
+/**
+ * Removes every finished (done or failed) job; queued and running ones stay.
+ * @returns {number} How many jobs were removed
+ */
+export function clearFinishedJobs() {
+  let removed = 0;
+  for (const job of jobs.values()) {
+    if (!isActive(job)) {
+      jobs.delete(job.id);
+      removed++;
+    }
+  }
+  return removed;
 }

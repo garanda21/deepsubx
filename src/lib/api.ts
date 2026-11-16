@@ -119,6 +119,16 @@ export const retryJob = async (id: string): Promise<TranslationJob> => {
   return data;
 };
 
+/** Removes a finished (done or failed) job from the list. */
+export const dismissJob = async (id: string): Promise<void> => {
+  await api.delete(`/jobs/${id}`);
+};
+
+/** Removes every finished (done or failed) job; active jobs stay. */
+export const clearFinishedJobs = async (): Promise<void> => {
+  await api.delete('/jobs');
+};
+
 export const getJobs = async (): Promise<TranslationJob[]> => {
   const { data } = await api.get<TranslationJob[]>('/jobs');
   return data;

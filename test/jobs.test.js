@@ -5,7 +5,7 @@ import { mockAxiosPost, httpError, deeplResponse, makeTempDir, writeSRT, waitFor
 
 delete process.env.TRANSLATION_PROVIDER;
 process.env.DEEPL_API_KEY = 'test-key';
-const { createTranslationJob, retryJob, getJob, listJobs } = await import('../server/services/jobs.js');
+const { createTranslationJob, retryJob, getJob, listJobs, dismissJob, clearFinishedJobs } = await import('../server/services/jobs.js');
 
 const dir = makeTempDir();
 
@@ -98,4 +98,56 @@ test('prunes completed jobs before failed ones', async () => {
   assert.ok(list.length <= 20, `kept ${list.length} jobs`);
   assert.ok(list.some(job => job.id === failed.id), 'the failed job survives pruning');
   assert.equal(list[0].file, 'bulk-24.en.srt', 'most recent first');
+});
+
+test('completed jobs expire after a day, failed ones stay', async (t) => {
+  clearFinishedJobs();
+  let failing = true;
+  mockAxiosPost((url, body) => {
+    if (failing) throw httpError(456, { message: 'Quota exceeded' });
+    return deeplResponse(body);
+  });
+  const failed = startJob(newFile('expire-failed'));
+  await waitFor(() => isFinished(failed.id));
+  failing = false;
+  const done = startJob(newFile('expire-done'));
+  await waitFor(() => isFinished(done.id));
+
+  const realNow = Date.now();
+  t.mock.method(Date, 'now', () => realNow + 23 * 60 * 60 * 1000);
+  assert.ok(getJob(done.id), 'still listed before 24 hours');
+
+  t.mock.method(Date, 'now', () => realNow + 25 * 60 * 60 * 1000);
+  assert.equal(getJob(done.id), null);
+  assert.deepEqual(listJobs().map(job => job.id), [failed.id]);
+});
+
+test('dismisses finished jobs but not active ones', async () => {
+  clearFinishedJobs();
+  let release;
+  const blocked = new Promise(resolve => { release = resolve; });
+  mockAxiosPost(async (url, body) => {
+    await blocked;
+    return deeplResponse(body);
+  });
+  const job = startJob(newFile('dismiss'));
+
+  assert.throws(() => dismissJob(job.id), { status: 409 });
+  assert.equal(clearFinishedJobs(), 0, 'active jobs are not cleared');
+
+  release();
+  await waitFor(() => isFinished(job.id));
+  dismissJob(job.id);
+  assert.equal(getJob(job.id), null);
+  assert.throws(() => dismissJob(job.id), { status: 404 });
+});
+
+test('clears every finished job', async () => {
+  clearFinishedJobs();
+  mockAxiosPost((url, body) => deeplResponse(body));
+  const jobs = [startJob(newFile('clear-1')), startJob(newFile('clear-2'))];
+  await waitFor(() => jobs.every(job => isFinished(job.id)));
+
+  assert.equal(clearFinishedJobs(), 2);
+  assert.deepEqual(listJobs(), []);
 });
